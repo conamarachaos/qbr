@@ -31,6 +31,9 @@ type RunResult = {
   opportunities: { opportunities: Opportunity[] };
   input: {
     sourceMap: Record<string, { label: string; content: string; type: string }>;
+    usage?: {
+      vertical?: string;
+    };
   };
   usageTotals: { totalTokens: number; inputTokens: number; outputTokens: number };
   stages: Array<{
@@ -535,6 +538,7 @@ export function QbrWorkbench({
               gaps={result.gaps.gaps}
               opportunities={result.opportunities.opportunities}
               sourceMap={result.input.sourceMap}
+              accountVertical={result.input.usage?.vertical}
               usageTotals={result.usageTotals}
               stages={result.stages}
               onDownload={downloadArtifact}

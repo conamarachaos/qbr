@@ -128,6 +128,7 @@ export async function runPipeline(
   });
   const opportunities = await runStage4Opportunities(gaps.data, goals.data, {
     generateObject: options.generateObject,
+    vertical: input.usage?.vertical,
   });
   usageTotals = addUsage(usageTotals, opportunities.usage);
   stages.push({

@@ -1,15 +1,24 @@
 import { getCatalogContext } from "@/lib/catalog";
 import { GapsResult, GoalsResult } from "@/lib/schemas";
 
-export function buildStage4Prompt(gaps: GapsResult, goals: GoalsResult) {
+export function buildStage4Prompt(
+  gaps: GapsResult,
+  goals: GoalsResult,
+  vertical?: string,
+) {
+  const relevantFeatures = Array.from(new Set(gaps.gaps.map((gap) => gap.feature)));
+
   return `Goals:
 ${JSON.stringify(goals, null, 2)}
 
 Gaps:
 ${JSON.stringify(gaps, null, 2)}
 
-Allowed product catalog:
-${getCatalogContext()}
+Relevant product catalog${vertical ? ` (${vertical})` : ""}:
+${getCatalogContext(relevantFeatures, {
+  vertical,
+  includePlaybooks: true,
+})}
 
 Task:
 Map expansion opportunities directly from detected gaps.
