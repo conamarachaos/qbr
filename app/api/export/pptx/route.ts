@@ -1,23 +1,7 @@
-import { z } from "zod";
-
+import { ExportPayloadSchema } from "@/lib/brief-export";
 import { buildBriefDeck } from "@/lib/deck";
-import {
-  BriefSchema,
-  GapSchema,
-  GoalSchema,
-  OpportunitySchema,
-  UsageItemSchema,
-} from "@/lib/schemas";
 
 export const runtime = "nodejs";
-
-const ExportPayloadSchema = z.object({
-  brief: BriefSchema,
-  goals: z.array(GoalSchema),
-  usage: z.array(UsageItemSchema),
-  gaps: z.array(GapSchema),
-  opportunities: z.array(OpportunitySchema),
-});
 
 export async function POST(request: Request) {
   const payload = ExportPayloadSchema.parse(await request.json());

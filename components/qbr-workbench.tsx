@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { type EditableBrief } from "@/lib/brief-export";
 import { type TranscriptAccountOption, type UsageRowOption } from "@/lib/dataset";
 import { type Brief, type Gap, type Goal, type Opportunity, type UsageItem } from "@/lib/schemas";
 
@@ -32,6 +33,13 @@ type RunResult = {
     sourceMap: Record<string, { label: string; content: string; type: string }>;
   };
   usageTotals: { totalTokens: number; inputTokens: number; outputTokens: number };
+  stages: Array<{
+    id: string;
+    label: string;
+    attempts: number;
+    modelId: string;
+    usage: { totalTokens: number; inputTokens: number; outputTokens: number };
+  }>;
 };
 
 const INITIAL_STAGE_STATE: Record<string, StageState> = {
@@ -104,7 +112,7 @@ export function QbrWorkbench({
   const [result, setResult] = useState<RunResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
-  const [downloadPending, setDownloadPending] = useState(false);
+  const [downloadFormat, setDownloadFormat] = useState<"pptx" | "pdf" | null>(null);
 
   const selectedAccount = useMemo(
     () => transcriptAccounts.find((account) => account.id === selectedAccountId),
@@ -245,14 +253,14 @@ export function QbrWorkbench({
     setRunning(false);
   }
 
-  async function downloadDeck() {
+  async function downloadArtifact(format: "pptx" | "pdf", editedBrief: EditableBrief) {
     if (!result) {
       return;
     }
 
-    setDownloadPending(true);
+    setDownloadFormat(format);
     try {
-      const response = await fetch("/api/export/pptx", {
+      const response = await fetch(`/api/export/${format}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -263,20 +271,33 @@ export function QbrWorkbench({
           usage: result.usage.usage,
           gaps: result.gaps.gaps,
           opportunities: result.opportunities.opportunities,
+          editedBrief,
         }),
       });
+
+      if (!response.ok) {
+        throw new Error(`Failed to export ${format.toUpperCase()}.`);
+      }
 
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `${result.brief.accountName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.pptx`;
+      link.download = `${result.brief.accountName
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")}.${format}`;
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
+    } catch (downloadError) {
+      setError(
+        downloadError instanceof Error
+          ? downloadError.message
+          : `Failed to export ${format.toUpperCase()}.`,
+      );
     } finally {
-      setDownloadPending(false);
+      setDownloadFormat(null);
     }
   }
 
@@ -515,8 +536,9 @@ export function QbrWorkbench({
               opportunities={result.opportunities.opportunities}
               sourceMap={result.input.sourceMap}
               usageTotals={result.usageTotals}
-              onDownload={downloadDeck}
-              downloadPending={downloadPending}
+              stages={result.stages}
+              onDownload={downloadArtifact}
+              downloadFormat={downloadFormat}
             />
           ) : null}
         </TabsContent>

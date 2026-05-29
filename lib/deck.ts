@@ -1,5 +1,11 @@
 import PptxGenJS from "pptxgenjs";
 
+import {
+  applyEditedBrief,
+  resolveTopGapExports,
+  resolveTopOpportunityExports,
+  type EditableBrief,
+} from "@/lib/brief-export";
 import { Brief, Gap, Goal, Opportunity, UsageItem } from "@/lib/schemas";
 
 interface DeckPayload {
@@ -8,6 +14,7 @@ interface DeckPayload {
   usage: UsageItem[];
   gaps: Gap[];
   opportunities: Opportunity[];
+  editedBrief?: EditableBrief;
 }
 
 function addTitleSlide(pptx: PptxGenJS, brief: Brief) {
@@ -80,18 +87,29 @@ function addBulletSlide(
 }
 
 export async function buildBriefDeck(payload: DeckPayload) {
+  const brief = applyEditedBrief(payload.brief, payload.editedBrief);
+  const topGapExports = resolveTopGapExports(
+    payload.brief,
+    payload.gaps,
+    payload.editedBrief,
+  );
+  const topOpportunityExports = resolveTopOpportunityExports(
+    payload.brief,
+    payload.opportunities,
+    payload.editedBrief,
+  );
   const pptx = new PptxGenJS();
   pptx.layout = "LAYOUT_WIDE";
   pptx.author = "QBR Agent";
   pptx.company = "BESWAS";
-  pptx.subject = `QBR brief for ${payload.brief.accountName}`;
-  pptx.title = `${payload.brief.accountName} QBR Brief`;
+  pptx.subject = `QBR brief for ${brief.accountName}`;
+  pptx.title = `${brief.accountName} QBR Brief`;
   pptx.theme = {
     headFontFace: "Aptos Display",
     bodyFontFace: "Aptos",
   };
 
-  addTitleSlide(pptx, payload.brief);
+  addTitleSlide(pptx, brief);
 
   const topGoals = payload.goals.slice(0, 3).map((goal) => `${goal.title}: ${goal.description}`);
   addBulletSlide(pptx, "Customer Goals", topGoals.length ? topGoals : ["No grounded goals identified."]);
@@ -107,12 +125,12 @@ export async function buildBriefDeck(payload: DeckPayload) {
     "C2410C",
   );
 
-  const topGapBullets = payload.brief.topGaps.map((gapId) => {
-    const gap = payload.gaps.find((item) => item.id === gapId);
-    return gap
-      ? `${gap.feature}: ${gap.reason} (severity ${gap.severity}/5)`
-      : gapId;
-  });
+  const topGapBullets = topGapExports.map(
+    (gap) =>
+      `${gap.title}: ${gap.description}${
+        typeof gap.severity === "number" ? ` (severity ${gap.severity}/5)` : ""
+      }`,
+  );
   addBulletSlide(
     pptx,
     "Top Adoption Gaps",
@@ -120,12 +138,14 @@ export async function buildBriefDeck(payload: DeckPayload) {
     "B45309",
   );
 
-  const topOpportunityBullets = payload.brief.topOpportunities.map((opportunityId) => {
-    const opportunity = payload.opportunities.find((item) => item.id === opportunityId);
-    return opportunity
-      ? `${opportunity.feature}: ${opportunity.pitch} (score ${opportunity.score.toFixed(2)})`
-      : opportunityId;
-  });
+  const topOpportunityBullets = topOpportunityExports.map(
+    (opportunity) =>
+      `${opportunity.title}: ${opportunity.description}${
+        typeof opportunity.score === "number"
+          ? ` (score ${opportunity.score.toFixed(2)})`
+          : ""
+      }`,
+  );
   addBulletSlide(
     pptx,
     "Expansion Opportunities",
@@ -134,7 +154,16 @@ export async function buildBriefDeck(payload: DeckPayload) {
       : ["No grounded expansion opportunities identified."],
   );
 
-  payload.brief.deckSlides.forEach((slide) =>
+  addBulletSlide(
+    pptx,
+    "Executive Asks",
+    brief.qbrOutline.asks.length
+      ? brief.qbrOutline.asks
+      : ["No asks were captured in the QBR outline."],
+    "92400E",
+  );
+
+  brief.deckSlides.forEach((slide) =>
     addBulletSlide(pptx, slide.title, slide.bullets, "1D4ED8"),
   );
 
