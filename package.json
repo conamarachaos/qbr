@@ -9,7 +9,8 @@
     "lint": "eslint . --max-warnings=0",
     "eval": "tsx scripts/eval.ts",
     "test": "vitest run",
-    "seed": "tsx prisma/seed.ts"
+    "seed": "tsx prisma/seed.ts",
+    "db:clean": "tsx scripts/clean-db.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.81",
