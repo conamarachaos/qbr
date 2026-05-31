@@ -10,6 +10,7 @@
     "eval": "tsx scripts/eval.ts",
     "test": "vitest run",
     "seed": "tsx prisma/seed.ts",
+    "seed:users": "tsx prisma/seed-users.ts",
     "db:clean": "tsx scripts/clean-db.ts"
   },
   "dependencies": {
