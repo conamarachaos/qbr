@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Download, FileText } from "lucide-react";
 
+import { SourceTimeline, type TimelineSource } from "@/components/app/source-timeline";
 import {
   Accordion,
   AccordionContent,
@@ -23,13 +24,19 @@ import { Brief, Gap, Goal, Opportunity, UsageItem } from "@/lib/schemas";
 
 interface BriefViewProps {
   brief: Brief;
+  initialEditedBrief?: EditableBrief;
   goals: Goal[];
   usage: UsageItem[];
   gaps: Gap[];
   opportunities: Opportunity[];
   sourceMap: Record<string, { label: string; content: string; type: string }>;
+  // When present, the cited-sources timeline enables summarize / ask-AI against
+  // the live account. Omitted in standalone contexts (e.g. the workbench).
+  accountId?: string;
   accountVertical?: string;
   usageTotals: { totalTokens: number; inputTokens: number; outputTokens: number };
+  grounding?: { checked: number; grounded: number; score: number };
+  timing?: { runtimeMs: number; manualBaselineMinutes: number; minutesSaved: number };
   stages: Array<{
     id: string;
     label: string;
@@ -39,6 +46,12 @@ interface BriefViewProps {
   }>;
   onDownload: (format: "pptx" | "pdf", editedBrief: EditableBrief) => Promise<void>;
   downloadFormat: "pptx" | "pdf" | null;
+  onSave?: (editedBrief: EditableBrief) => Promise<void>;
+  onApprove?: (editedBrief: EditableBrief) => Promise<void>;
+  saveState?: "idle" | "saving" | "saved" | "error";
+  approvedAt?: string | null;
+  exportLocked?: boolean;
+  showIntegrations?: boolean;
 }
 
 type ClaimEvidence = Array<{ sourceId: string; sourceType: string; quote: string }>;
@@ -222,11 +235,29 @@ function CitationExpander({
 }
 
 export function BriefView(props: BriefViewProps) {
-  const baseEditableBrief = useMemo(
+  const generatedEditableBrief = useMemo(
     () => createEditableBrief(props.brief, props.gaps, props.opportunities),
     [props.brief, props.gaps, props.opportunities],
   );
+  const baseEditableBrief = props.initialEditedBrief ?? generatedEditableBrief;
   const [editedBrief, setEditedBrief] = useState<EditableBrief>(baseEditableBrief);
+
+  // Adapt the persisted sourceMap to the shared SourceTimeline shape. The map
+  // has no per-source timestamp, so we synthesize ascending ISO times from the
+  // insertion order (calls → emails → usage) to preserve a stable sequence —
+  // the timeline sorts by createdAt.
+  const citedSourceTimeline = useMemo<TimelineSource[]>(() => {
+    const entries = Object.entries(props.sourceMap);
+    const base = Date.UTC(2024, 0, 1);
+    return entries.map(([sourceId, source], index) => ({
+      id: sourceId,
+      label: source.label,
+      type: source.type,
+      content: source.content,
+      createdAt: new Date(base + index * 60_000).toISOString(),
+      summary: null,
+    }));
+  }, [props.sourceMap]);
   const [crmStatus, setCrmStatus] = useState<{
     state: "idle" | "loading" | "success" | "error";
     id?: string;
@@ -353,10 +384,27 @@ export function BriefView(props: BriefViewProps) {
               <Badge variant={confidenceVariant(props.brief.overallConfidence)}>
                 overall confidence {Math.round(props.brief.overallConfidence * 100)}%
               </Badge>
+              {props.grounding ? (
+                <Badge
+                  variant={
+                    props.grounding.score >= 0.999
+                      ? "default"
+                      : props.grounding.score >= 0.9
+                        ? "secondary"
+                        : "destructive"
+                  }
+                >
+                  evidence grounded {Math.round(props.grounding.score * 100)}% (
+                  {props.grounding.grounded}/{props.grounding.checked})
+                </Badge>
+              ) : null}
               {edited ? (
                 <Badge variant="outline" className="text-muted-foreground">
                   edited
                 </Badge>
+              ) : null}
+              {props.approvedAt ? (
+                <Badge>approved</Badge>
               ) : null}
             </div>
             <CardTitle className="text-2xl">{props.brief.accountName}</CardTitle>
@@ -370,42 +418,84 @@ export function BriefView(props: BriefViewProps) {
           </div>
           <div className="flex flex-col items-start gap-3 md:items-end">
             <div className="text-right text-sm text-muted-foreground">
+              {props.timing ? (
+                <div className="font-medium text-foreground">
+                  ~{props.timing.minutesSaved} min saved vs {props.timing.manualBaselineMinutes}
+                  -min manual prep
+                </div>
+              ) : null}
               <div>{props.usageTotals.totalTokens.toLocaleString()} total tokens</div>
               <div>{formatEstimatedUsd(stageCosts.totalUsd)} estimated cost</div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Button
-                variant="outline"
-                onClick={pushToCrm}
-                disabled={crmStatus.state === "loading" || slackStatus.state === "loading"}
-              >
-                {crmStatus.state === "loading" ? "Pushing to CRM..." : "Push to CRM (mock)"}
-              </Button>
-              <Button
-                variant="outline"
-                onClick={sendToSlack}
-                disabled={crmStatus.state === "loading" || slackStatus.state === "loading"}
-              >
-                {slackStatus.state === "loading"
-                  ? "Sending to Slack..."
-                  : "Send to Slack (mock)"}
-              </Button>
+              {props.onSave ? (
+                <Button
+                  variant="outline"
+                  onClick={() => props.onSave?.(editedBrief)}
+                  disabled={props.saveState === "saving"}
+                >
+                  {props.saveState === "saving" ? "Saving..." : "Save brief"}
+                </Button>
+              ) : null}
+              {props.onApprove ? (
+                <Button
+                  variant="outline"
+                  onClick={() => props.onApprove?.(editedBrief)}
+                  disabled={props.saveState === "saving"}
+                >
+                  {props.approvedAt ? "Approved" : "Approve brief"}
+                </Button>
+              ) : null}
+              {props.showIntegrations === false ? null : (
+                <Button
+                  variant="outline"
+                  onClick={pushToCrm}
+                  disabled={crmStatus.state === "loading" || slackStatus.state === "loading"}
+                >
+                  {crmStatus.state === "loading" ? "Pushing to CRM..." : "Push to CRM (mock)"}
+                </Button>
+              )}
+              {props.showIntegrations === false ? null : (
+                <Button
+                  variant="outline"
+                  onClick={sendToSlack}
+                  disabled={crmStatus.state === "loading" || slackStatus.state === "loading"}
+                >
+                  {slackStatus.state === "loading"
+                    ? "Sending to Slack..."
+                    : "Send to Slack (mock)"}
+                </Button>
+              )}
               <Button
                 variant="outline"
                 onClick={() => props.onDownload("pdf", editedBrief)}
-                disabled={props.downloadFormat !== null}
+                disabled={props.downloadFormat !== null || props.exportLocked}
               >
                 <FileText className="h-4 w-4" />
-                {props.downloadFormat === "pdf" ? "Preparing PDF..." : "Download PDF"}
+                {props.downloadFormat === "pdf"
+                  ? "Preparing PDF..."
+                  : props.exportLocked
+                    ? "Approve before PDF export"
+                    : "Download PDF"}
               </Button>
               <Button
                 onClick={() => props.onDownload("pptx", editedBrief)}
-                disabled={props.downloadFormat !== null}
+                disabled={props.downloadFormat !== null || props.exportLocked}
               >
                 <Download className="h-4 w-4" />
-                {props.downloadFormat === "pptx" ? "Preparing deck..." : "Download PPTX"}
+                {props.downloadFormat === "pptx"
+                  ? "Preparing deck..."
+                  : props.exportLocked
+                    ? "Approve before PPTX export"
+                    : "Download PPTX"}
               </Button>
             </div>
+            {props.saveState === "saved" ? (
+              <div className="text-xs text-muted-foreground">Changes saved.</div>
+            ) : null}
+            {props.saveState === "error" ? (
+              <div className="text-xs text-destructive">Saving failed.</div>
+            ) : null}
             {crmStatus.state === "success" ? (
               <div className="max-w-sm rounded-2xl border border-border/70 bg-background/80 px-4 py-3 text-sm">
                 Mock CRM saved as <span className="font-medium">{crmStatus.id}</span>.
@@ -731,7 +821,8 @@ export function BriefView(props: BriefViewProps) {
             sourceMap={props.sourceMap}
             renderHeader={(opportunity) => (
               <div className="space-y-1 text-left">
-                <div className="font-medium">{opportunity.pitch}</div>
+                <div className="font-medium">{opportunity.title ?? opportunity.pitch}</div>
+                <div className="text-xs text-muted-foreground">{opportunity.pitch}</div>
                 <div className="text-xs text-muted-foreground">
                   {opportunity.feature} · gap {opportunity.gapId} · impact{" "}
                   {opportunity.expectedImpact}
@@ -744,21 +835,14 @@ export function BriefView(props: BriefViewProps) {
         <TabsContent value="sources">
           <Card>
             <CardHeader>
-              <CardTitle>Source snippets</CardTitle>
+              <CardTitle>Cited sources</CardTitle>
               <CardDescription>
-                The pipeline cites these source ids directly. Use them to trace every claim.
+                The pipeline cites these sources directly. Expand one to read the full content,
+                summarize it, or ask the AI about it.
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {Object.entries(props.sourceMap).map(([sourceId, source]) => (
-                <div key={sourceId} className="rounded-3xl border border-border/80 p-4">
-                  <div className="mb-2 flex flex-wrap items-center gap-2">
-                    <Badge variant="outline">{source.type}</Badge>
-                    <span className="text-sm font-medium">{source.label}</span>
-                  </div>
-                  <p className="text-sm leading-6 text-muted-foreground">{source.content}</p>
-                </div>
-              ))}
+            <CardContent>
+              <SourceTimeline accountId={props.accountId} sources={citedSourceTimeline} />
             </CardContent>
           </Card>
         </TabsContent>

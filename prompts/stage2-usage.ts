@@ -7,18 +7,15 @@ export function buildStage2Prompt(
 ) {
   return `Account: ${input.accountName}
 
-Goals:
+Goals (each already carries the exact source quotes that support it):
 ${JSON.stringify(goals, null, 2)}
 
 Usage context:
 ${input.usageContext}
 
-Supporting transcript/email context:
-${[input.transcriptContext, input.emailContext].filter(Boolean).join("\n\n")}
-
 Task:
 For each goal, assess whether current usage is working, partial, or lagging.
-Use usage metrics when available. When usage is absent, rely on transcript/email evidence and lower confidence.
+Use usage metrics when available. When usage is absent, rely on the evidence quotes already attached to each goal and lower confidence.
 
 Each usage item needs:
 - goalId
@@ -27,6 +24,12 @@ Each usage item needs:
 - notes
 - evidence[] with exact quotes
 - confidence 0-1
+
+Evidence rules:
+- You may cite two kinds of evidence, and nothing else:
+  1. The goal's existing evidence quotes, reused verbatim.
+  2. Lines from the usage source above, copied verbatim (use sourceId "${input.usage?.sourceId ?? "usage-1"}", sourceType "usage").
+- Do not invent quotes or metrics that are not present in the goal evidence or the usage source.
 
 Rules:
 - "working" requires supporting metrics or a strong sourced statement.

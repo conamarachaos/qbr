@@ -59,8 +59,8 @@ export function createEditableBrief(
       const opportunity = opportunities.find((item) => item.id === opportunityId);
       return {
         id: opportunityId,
-        title: opportunity?.pitch ?? opportunityId,
-        description: opportunity?.expectedImpact ?? opportunityId,
+        title: opportunity?.title ?? opportunity?.pitch ?? opportunityId,
+        description: opportunity?.pitch ?? opportunity?.expectedImpact ?? opportunityId,
       };
     }),
     qbrOutline: {
@@ -122,9 +122,10 @@ export function resolveTopOpportunityExports(
 
     return {
       id: opportunityId,
-      title: editedOpportunity?.title ?? opportunity?.pitch ?? opportunityId,
+      title: editedOpportunity?.title ?? opportunity?.title ?? opportunity?.pitch ?? opportunityId,
       description:
         editedOpportunity?.description ??
+        opportunity?.pitch ??
         opportunity?.expectedImpact ??
         opportunityId,
       confidence: opportunity?.confidence ?? brief.overallConfidence,

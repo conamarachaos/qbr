@@ -21,6 +21,11 @@ export interface UsageRowOption {
   row: Record<string, unknown>;
 }
 
+export interface SeedAccountMapping {
+  transcriptAccountId: string;
+  usageAccountName?: string;
+}
+
 function humanizeSlug(slug: string) {
   return slug
     .split("-")
@@ -80,6 +85,33 @@ export function loadUsageRows(): UsageRowOption[] {
     summary: summarizeUsageRow(row),
     row,
   }));
+}
+
+export function findUsageRowByAccountName(accountName: string) {
+  return loadUsageRows().find((option) => option.name === accountName);
+}
+
+export async function loadSeedDataset() {
+  const transcriptAccounts = await loadTranscriptAccounts();
+  const usageOptions = loadUsageRows();
+
+  return {
+    transcriptAccounts,
+    usageOptions,
+    mappings: [
+      {
+        transcriptAccountId: "meridian-furniture",
+        usageAccountName: "Auscraft Furniture",
+      },
+      {
+        transcriptAccountId: "northfield-electrical",
+        usageAccountName: "Mr Sparky",
+      },
+      {
+        transcriptAccountId: "apex",
+      },
+    ] satisfies SeedAccountMapping[],
+  };
 }
 
 export async function loadDatasetOptions() {

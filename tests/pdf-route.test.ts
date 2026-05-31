@@ -92,6 +92,7 @@ describe("pdf export route", () => {
               id: "opp-1",
               gapId: "gap-1",
               feature: "AI",
+              title: "Expansion opportunity",
               pitch: "Expand AI coverage for after-hours inquiries.",
               expectedImpact: "Recover more inbound leads without adding headcount.",
               score: 0.92,

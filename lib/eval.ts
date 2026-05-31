@@ -1,5 +1,6 @@
-import type { PipelineRunResult } from "@/lib/pipeline";
+import type { GroundingReport, PipelineRunResult } from "@/lib/pipeline";
 import { isCatalogFeature } from "@/lib/catalog";
+import { formatGroundingIssue } from "@/lib/grounding";
 import {
   validateNarrativeInvariants,
   validateOpportunityInvariants,
@@ -8,7 +9,10 @@ import {
 type EvalTarget = Pick<
   PipelineRunResult,
   "goals" | "gaps" | "opportunities" | "brief"
->;
+> & {
+  /** Optional grounding report; when present, failed quotes become eval errors. */
+  grounding?: GroundingReport;
+};
 
 function collectEvidenceErrors(
   label: string,
@@ -74,6 +78,12 @@ export function evaluatePipelineStructure(result: EvalTarget) {
     errors.push(
       `Brief overallConfidence must be within [0,1], received ${result.brief.overallConfidence}.`,
     );
+  }
+
+  if (result.grounding) {
+    for (const issue of result.grounding.issues) {
+      errors.push(formatGroundingIssue(issue));
+    }
   }
 
   return {

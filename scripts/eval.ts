@@ -186,15 +186,21 @@ function buildOfflineFixture(
     sourceType: "usage" as const,
     quote: input.usageContext.slice(0, 180),
   };
+  // Build a usage quote from a single real line of the usage context so it is
+  // verifiably grounded (the grounding verifier checks the quote is a substring
+  // of the cited source — joining lines with a separator that is not in the
+  // source would fail that check).
   const usageEvidence: Evidence =
     input.usage && input.sourceMap[input.usage.sourceId]
       ? {
           sourceId: input.usage.sourceId,
           sourceType: "usage",
-          quote: input.sourceMap[input.usage.sourceId].content
-            .split(/\r?\n/)
-            .slice(0, 3)
-            .join(" | "),
+          quote:
+            input.sourceMap[input.usage.sourceId].content
+              .split(/\r?\n/)
+              .map((line) => line.trim())
+              .find((line) => line.length > 24) ??
+            input.sourceMap[input.usage.sourceId].content,
         }
       : fallbackEvidence;
 
@@ -242,6 +248,7 @@ function buildOfflineFixture(
       id: `opp-${index + 1}`,
       gapId: gap.id,
       feature: gap.feature,
+      title: `${gap.feature} expansion`,
       pitch:
         template.gaps[index]?.pitch ||
         PRODUCT_CATALOG[gap.feature].pitchTemplate,

@@ -53,6 +53,44 @@ function toTokenTotals(usage: LanguageModelUsage): TokenTotals {
   };
 }
 
+const RATE_LIMIT_BASE_DELAY_MS = 8_000;
+const RATE_LIMIT_MAX_DELAY_MS = 60_000;
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Anthropic 429s surface as APICallError with statusCode 429 and (usually) a
+ * `retry-after` header in seconds. Returns the delay to wait in ms, or null if
+ * the error is not a rate-limit error.
+ */
+function rateLimitDelayMs(error: unknown, attempt: number): number | null {
+  const status =
+    (error as { statusCode?: number; status?: number })?.statusCode ??
+    (error as { status?: number })?.status;
+  const message = error instanceof Error ? error.message : String(error);
+  const isRateLimit = status === 429 || /rate limit|429|too many requests/i.test(message);
+
+  if (!isRateLimit) {
+    return null;
+  }
+
+  const headers =
+    (error as { responseHeaders?: Record<string, string>; headers?: Record<string, string> })
+      ?.responseHeaders ??
+    (error as { headers?: Record<string, string> })?.headers;
+  const retryAfter = headers?.["retry-after"] ?? headers?.["Retry-After"];
+  const retryAfterMs = retryAfter ? Number(retryAfter) * 1_000 : NaN;
+
+  if (Number.isFinite(retryAfterMs) && retryAfterMs > 0) {
+    return Math.min(retryAfterMs, RATE_LIMIT_MAX_DELAY_MS);
+  }
+
+  // Exponential backoff: 8s, 16s, 32s … capped.
+  return Math.min(RATE_LIMIT_BASE_DELAY_MS * 2 ** attempt, RATE_LIMIT_MAX_DELAY_MS);
+}
+
 function formatError(error: unknown) {
   if (error instanceof ZodError) {
     return error.issues
@@ -91,6 +129,8 @@ export async function runStructuredStage<T>({
 }: RunStructuredStageArgs<T>): Promise<StageRunResult<T>> {
   let attempt = 0;
   let previousError = "";
+  let rateLimitWaits = 0;
+  const maxRateLimitWaits = 6;
 
   while (attempt <= maxValidationRetries) {
     const promptWithRetry = previousError
@@ -118,6 +158,15 @@ export async function runStructuredStage<T>({
         usage: toTokenTotals(result.usage),
       };
     } catch (error) {
+      // Rate-limit (429) errors are transient: wait out the window and retry
+      // the same attempt without consuming a validation retry.
+      const delayMs = rateLimitDelayMs(error, rateLimitWaits);
+      if (delayMs !== null && rateLimitWaits < maxRateLimitWaits) {
+        rateLimitWaits += 1;
+        await sleep(delayMs);
+        continue;
+      }
+
       previousError = formatError(error);
 
       if (attempt === maxValidationRetries) {

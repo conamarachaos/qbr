@@ -1,0 +1,382 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
+}
+
+model Workspace {
+  id        String       @id @default(cuid())
+  name      String
+  createdAt DateTime     @default(now())
+  members   Membership[]
+  accounts  Account[]
+}
+
+model User {
+  id            String             @id @default(cuid())
+  email         String             @unique
+  name          String?
+  passwordHash  String
+  createdAt     DateTime           @default(now())
+  memberships   Membership[]
+  ownerships    AccountOwnership[]
+  sessions      Session[]
+  accounts      Account[]          @relation("createdAccounts")
+  authAccounts  AuthAccount[]
+  authenticators Authenticator[]
+}
+
+model Membership {
+  id          String    @id @default(cuid())
+  userId      String
+  workspaceId String
+  role        Role      @default(am)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId])
+}
+
+enum Role {
+  am
+  cs_lead
+  admin
+}
+
+model Account {
+  id             String             @id @default(cuid())
+  workspaceId    String
+  name           String
+  vertical       String?
+  tier           Tier               @default(growth)
+  arr            Int?
+  renewalDate    DateTime?
+  lifecycle      Lifecycle          @default(active)
+  createdById    String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  workspace      Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy      User?              @relation("createdAccounts", fields: [createdById], references: [id])
+  ownerships     AccountOwnership[]
+  contacts       Contact[]
+  sources        Source[]
+  usageSnapshots UsageSnapshot[]
+  healthScores   HealthScore[]
+  qbrRuns        QbrRun[]
+  opportunities  Opportunity[]
+  gaps           Gap[]
+  actionItems    ActionItem[]
+  sourceChunks   SourceChunk[]
+  chatMessages   ChatMessage[]
+
+  @@index([workspaceId])
+}
+
+enum Tier {
+  strategic
+  growth
+  at_risk
+}
+
+enum Lifecycle {
+  onboarding
+  active
+  renewal
+  churned
+}
+
+model AccountOwnership {
+  id        String        @id @default(cuid())
+  accountId String
+  userId    String
+  role      OwnershipRole @default(primary_am)
+  account   Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, userId])
+  @@index([userId])
+}
+
+enum OwnershipRole {
+  primary_am
+  secondary
+  exec_sponsor
+}
+
+model Contact {
+  id            String      @id @default(cuid())
+  accountId     String
+  name          String
+  title         String?
+  roleType      ContactRole @default(user)
+  email         String?
+  lastEngagedAt DateTime?
+  account       Account     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+}
+
+enum ContactRole {
+  champion
+  economic_buyer
+  user
+  detractor
+}
+
+model Source {
+  id           String     @id @default(cuid())
+  accountId    String
+  type         SourceType
+  label        String
+  content      String     @db.Text
+  uploadedById String?
+  createdAt    DateTime   @default(now())
+  summary      Json?
+  summaryAt    DateTime?
+  account      Account    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  chunks       SourceChunk[]
+
+  @@index([accountId])
+}
+
+enum SourceType {
+  call
+  email
+  usage
+}
+
+model UsageSnapshot {
+  id        String   @id @default(cuid())
+  accountId String
+  period    String
+  data      Json
+  createdAt DateTime @default(now())
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+}
+
+model HealthScore {
+  id         String         @id @default(cuid())
+  accountId  String
+  asOf       DateTime       @default(now())
+  overall    Int
+  category   HealthCategory
+  components Json
+  account    Account        @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+}
+
+enum HealthCategory {
+  healthy
+  at_risk
+  critical
+}
+
+model QbrRun {
+  id            String    @id @default(cuid())
+  accountId     String
+  triggeredById String?
+  status        RunStatus @default(running)
+  period        String?
+  modelMeta     Json?
+  usageTotals   Json?
+  stages        Json?
+  goals         Json?
+  usage         Json?
+  gaps          Json?
+  opportunities Json?
+  error         String?
+  createdAt     DateTime  @default(now())
+  account       Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  brief         Brief?
+
+  @@index([accountId])
+}
+
+enum RunStatus {
+  queued
+  running
+  ready
+  failed
+}
+
+model Brief {
+  id         String    @id @default(cuid())
+  qbrRunId   String    @unique
+  data       Json
+  edited     Boolean   @default(false)
+  approvedAt DateTime?
+  qbrRun     QbrRun    @relation(fields: [qbrRunId], references: [id], onDelete: Cascade)
+}
+
+model Opportunity {
+  id             String    @id @default(cuid())
+  accountId      String
+  qbrRunId       String?
+  feature        String
+  title          String?
+  pitch          String    @db.Text
+  expectedImpact String?   @db.Text
+  score          Float?
+  type           OppType   @default(expansion)
+  stage          OppStage  @default(identified)
+  amount         Int?
+  createdAt      DateTime  @default(now())
+  account        Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+}
+
+enum OppType {
+  renewal
+  expansion
+  upsell
+}
+
+enum OppStage {
+  identified
+  qualified
+  proposed
+  won
+  lost
+}
+
+model Gap {
+  id         String    @id @default(cuid())
+  accountId  String
+  qbrRunId   String?
+  feature    String
+  reason     String    @db.Text
+  severity   Int       @default(3)
+  status     GapStatus @default(open)
+  createdAt  DateTime  @default(now())
+  account    Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+}
+
+enum GapStatus {
+  open
+  in_progress
+  addressed
+  dismissed
+}
+
+model ActionItem {
+  id        String       @id @default(cuid())
+  accountId String
+  qbrRunId  String?
+  title     String
+  ownerId   String?
+  dueDate   DateTime?
+  status    ActionStatus @default(open)
+  createdAt DateTime     @default(now())
+  account   Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+}
+
+enum ActionStatus {
+  open
+  in_progress
+  done
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model AuthAccount {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("auth_accounts")
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+model Authenticator {
+  credentialID         String  @unique
+  userId               String
+  providerAccountId    String
+  credentialPublicKey  String
+  counter              Int
+  credentialDeviceType String
+  credentialBackedUp   Boolean
+  transports           String?
+  user                 User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, credentialID])
+  @@map("authenticators")
+}
+
+// Embedding index over account Source content. Derived data only (no pipeline
+// impact). The `embedding vector(1536)` column is added via raw SQL in the
+// migration — Prisma's Unsupported type means it is never read/written through
+// the client; all vector ops go through $queryRaw/$executeRaw in lib/repo/chunks.ts.
+model SourceChunk {
+  id         String                       @id @default(cuid())
+  accountId  String
+  sourceId   String
+  chunkIndex Int
+  content    String                       @db.Text
+  embedding  Unsupported("vector(1536)")?
+  createdAt  DateTime                     @default(now())
+  account    Account                      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  source     Source                       @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+  @@index([sourceId])
+}
+
+enum ChatRole {
+  user
+  assistant
+}
+
+// Persisted account Q&A. Citations are [{ sourceId, quote, grounded }] verified
+// against the cited source via lib/grounding.ts before persisting.
+model ChatMessage {
+  id        String   @id @default(cuid())
+  accountId String
+  userId    String?
+  role      ChatRole
+  content   String   @db.Text
+  citations Json?
+  createdAt DateTime @default(now())
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+}

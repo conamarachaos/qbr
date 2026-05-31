@@ -28,7 +28,8 @@ Each opportunity needs:
 - id
 - gapId
 - feature
-- pitch
+- title (a concise label, max ~6 words / 80 chars, e.g. "Automate review responses for SMB tier")
+- pitch (the full one-to-two sentence expansion pitch)
 - expectedImpact
 - score 0-1
 - confidence 0-1

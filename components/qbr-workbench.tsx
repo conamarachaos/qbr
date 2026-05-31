@@ -36,6 +36,8 @@ type RunResult = {
     };
   };
   usageTotals: { totalTokens: number; inputTokens: number; outputTokens: number };
+  grounding?: { checked: number; grounded: number; score: number };
+  timing?: { runtimeMs: number; manualBaselineMinutes: number; minutesSaved: number };
   stages: Array<{
     id: string;
     label: string;
@@ -305,7 +307,7 @@ export function QbrWorkbench({
   }
 
   return (
-    <div className="mx-auto max-w-7xl space-y-8 px-4 py-8 md:px-8 lg:py-12">
+    <div className="w-full space-y-8">
       <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
         <div className="space-y-4">
           <Badge className="rounded-full px-3 py-1 text-sm">
@@ -540,6 +542,8 @@ export function QbrWorkbench({
               sourceMap={result.input.sourceMap}
               accountVertical={result.input.usage?.vertical}
               usageTotals={result.usageTotals}
+              grounding={result.grounding}
+              timing={result.timing}
               stages={result.stages}
               onDownload={downloadArtifact}
               downloadFormat={downloadFormat}

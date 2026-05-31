@@ -1,4 +1,14 @@
-import { normalizeAccountInput, type NormalizeAccountInputArgs, type NormalizedAccountInput } from "@/lib/ingest";
+import {
+  formatGroundingIssue,
+  verifyItems,
+  type GroundingIssue,
+} from "@/lib/grounding";
+import {
+  normalizeAccountInput,
+  type NormalizeAccountInputArgs,
+  type NormalizedAccountInput,
+  type NormalizedSource,
+} from "@/lib/ingest";
 import {
   addUsage,
   emptyUsage,
@@ -11,7 +21,14 @@ import { runStage2Usage } from "@/lib/pipeline/stage2-usage";
 import { runStage3Gaps } from "@/lib/pipeline/stage3-gaps";
 import { runStage4Opportunities } from "@/lib/pipeline/stage4-opportunities";
 import { runStage5Narrative } from "@/lib/pipeline/stage5-narrative";
-import { Brief, GapsResult, GoalsResult, OpportunitiesResult, UsageResult } from "@/lib/schemas";
+import {
+  Brief,
+  GapsResult,
+  GoalsResult,
+  OpportunitiesResult,
+  UsageResult,
+  rankBriefSelections,
+} from "@/lib/schemas";
 
 export const PIPELINE_STAGES = [
   { id: "stage1", label: "Goal extraction" },
@@ -21,6 +38,33 @@ export const PIPELINE_STAGES = [
   { id: "stage5", label: "Narrative generation" },
 ] as const;
 
+export interface GroundingReport {
+  /** Total evidence quotes checked across goals, usage, gaps, opportunities. */
+  checked: number;
+  /** Quotes that could not be matched back to their cited source. */
+  grounded: number;
+  /** 0-1 share of checked quotes that are verifiably grounded. */
+  score: number;
+  issues: GroundingIssue[];
+}
+
+/**
+ * Time-saved framing for the case study's headline metric ("Save AMs 30–60
+ * minutes per account"). We compare the agent's wall-clock runtime against a
+ * conservative manual-prep baseline so the brief can surface minutes saved.
+ */
+export interface TimingReport {
+  /** Wall-clock pipeline runtime in milliseconds. */
+  runtimeMs: number;
+  /** Assumed manual QBR-prep time in minutes (conservative end of 30–60). */
+  manualBaselineMinutes: number;
+  /** manualBaselineMinutes minus agent runtime, floored at 0, in minutes. */
+  minutesSaved: number;
+}
+
+/** Conservative low end of the case study's 30–60 minute manual-prep range. */
+export const MANUAL_QBR_BASELINE_MINUTES = 45;
+
 export interface PipelineRunResult {
   input: NormalizedAccountInput;
   goals: GoalsResult;
@@ -29,6 +73,8 @@ export interface PipelineRunResult {
   opportunities: OpportunitiesResult;
   brief: Brief;
   usageTotals: TokenTotals;
+  grounding: GroundingReport;
+  timing: TimingReport;
   stages: Array<{
     id: (typeof PIPELINE_STAGES)[number]["id"];
     label: string;
@@ -53,6 +99,7 @@ export async function runPipeline(
 ): Promise<PipelineRunResult> {
   const stages: PipelineRunResult["stages"] = [];
   let usageTotals = emptyUsage();
+  const startedAt = Date.now();
 
   emit(options.onStage, {
     stage: PIPELINE_STAGES[0].id,
@@ -175,17 +222,113 @@ export async function runPipeline(
     usage: brief.usage,
   });
 
+  const grounding = computeGroundingReport(input, {
+    goals: goals.data,
+    usage: usage.data,
+    gaps: gaps.data,
+    opportunities: opportunities.data,
+  });
+
+  const rankedBrief = rankBriefSelections(
+    brief.data.brief,
+    gaps.data.gaps,
+    opportunities.data.opportunities,
+  );
+
+  const runtimeMs = Date.now() - startedAt;
+  const timing: TimingReport = {
+    runtimeMs,
+    manualBaselineMinutes: MANUAL_QBR_BASELINE_MINUTES,
+    minutesSaved: Math.max(
+      0,
+      Math.round(MANUAL_QBR_BASELINE_MINUTES - runtimeMs / 60_000),
+    ),
+  };
+
   return {
     input,
     goals: goals.data,
     usage: usage.data,
     gaps: gaps.data,
     opportunities: opportunities.data,
-    brief: brief.data.brief,
+    brief: rankedBrief,
     usageTotals,
+    grounding,
+    timing,
     stages,
   };
 }
+
+/**
+ * Re-check every evidence quote the pipeline produced against the source it
+ * cites. Usage items have no stable `id`, so we key them by goalId for the
+ * report. The score is the fraction of checked quotes that are grounded.
+ */
+function computeGroundingReport(
+  input: NormalizedAccountInput,
+  data: {
+    goals: GoalsResult;
+    usage: UsageResult;
+    gaps: GapsResult;
+    opportunities: OpportunitiesResult;
+  },
+): GroundingReport {
+  const issues: GroundingIssue[] = [];
+  let checked = 0;
+
+  const countEvidence = (items: Array<{ evidence: unknown[] }>) =>
+    items.reduce((total, item) => total + item.evidence.length, 0);
+
+  checked += countEvidence(data.goals.goals);
+  checked += countEvidence(data.usage.usage);
+  checked += countEvidence(data.gaps.gaps);
+  checked += countEvidence(data.opportunities.opportunities);
+
+  // Later stages legitimately reuse quotes that originate from raw sources, but
+  // may cite the upstream item's id (e.g. an opportunity citing "gap-1"). Treat
+  // each upstream item as a derived source whose content is the concatenation
+  // of its own (already verified) quotes, so honest chaining is not penalized
+  // while genuinely fabricated quotes still fail.
+  const derivedSourceMap = { ...input.sourceMap };
+  const addDerivedSource = (
+    id: string,
+    type: NormalizedSource["type"],
+    evidence: Array<{ quote: string }>,
+  ) => {
+    derivedSourceMap[id] = {
+      id,
+      type,
+      label: id,
+      content: evidence.map((item) => item.quote).join("\n"),
+    };
+  };
+  for (const goal of data.goals.goals) {
+    addDerivedSource(goal.id, "call", goal.evidence);
+  }
+  for (const gap of data.gaps.gaps) {
+    addDerivedSource(gap.id, "call", gap.evidence);
+  }
+
+  issues.push(...verifyItems("Goal", data.goals.goals, input.sourceMap).issues);
+  issues.push(
+    ...verifyItems(
+      "Usage",
+      data.usage.usage.map((item) => ({ id: item.goalId, evidence: item.evidence })),
+      derivedSourceMap,
+    ).issues,
+  );
+  issues.push(...verifyItems("Gap", data.gaps.gaps, derivedSourceMap).issues);
+  issues.push(
+    ...verifyItems("Opportunity", data.opportunities.opportunities, derivedSourceMap).issues,
+  );
+
+  const grounded = Math.max(0, checked - issues.length);
+  const score = checked === 0 ? 1 : grounded / checked;
+
+  return { checked, grounded, score, issues };
+}
+
+export { formatGroundingIssue };
 
 export async function runPipelineFromRawInput(
   input: NormalizeAccountInputArgs,

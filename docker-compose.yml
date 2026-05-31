@@ -1,0 +1,28 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: qbr-agent-postgres
+    environment:
+      POSTGRES_DB: qbr_agent
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - qbr-agent-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d qbr_agent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - default
+      - aidev
+
+volumes:
+  qbr-agent-postgres-data:
+
+networks:
+  aidev:
+    external: true
+    name: aidev_default

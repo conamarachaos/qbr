@@ -60,6 +60,9 @@ export const OpportunitySchema = z.object({
   id: z.string().min(1),
   gapId: z.string().min(1),
   feature: z.enum(PRODUCT_FEATURES),
+  // Optional so historical runs persisted before titles existed still parse.
+  // The pipeline prompt asks the model to always produce one for new runs.
+  title: z.string().min(1).max(80).optional(),
   pitch: z.string().min(1),
   expectedImpact: z.string().min(1),
   score: z.number().min(0).max(1),
@@ -121,6 +124,43 @@ export function validateOpportunityInvariants(
       `Opportunity ${invalid.id} references unknown gapId ${invalid.gapId}.`,
     );
   }
+}
+
+/**
+ * The narrative stage chooses which gaps/opportunities make the top-3, but the
+ * choice should be driven by the severity/score the earlier stages computed —
+ * not left entirely to the model. This re-ranks the brief's selections so the
+ * highest-severity gaps and highest-scoring opportunities lead, while keeping
+ * the model's selection as the tie-breaker (and never inventing new ids).
+ */
+export function rankBriefSelections(
+  brief: Brief,
+  gaps: Gap[],
+  opportunities: Opportunity[],
+): Brief {
+  const gapSeverity = new Map(gaps.map((gap) => [gap.id, gap.severity]));
+  const opportunityScore = new Map(
+    opportunities.map((opportunity) => [opportunity.id, opportunity.score]),
+  );
+
+  const rankBy = <V>(ids: string[], weights: Map<string, V>, fallback: V) =>
+    ids
+      .map((id, index) => ({ id, index }))
+      .sort((a, b) => {
+        const weightA = (weights.get(a.id) ?? fallback) as number;
+        const weightB = (weights.get(b.id) ?? fallback) as number;
+        if (weightB !== weightA) {
+          return weightB - weightA;
+        }
+        return a.index - b.index;
+      })
+      .map((entry) => entry.id);
+
+  return {
+    ...brief,
+    topGaps: rankBy(brief.topGaps, gapSeverity, 0),
+    topOpportunities: rankBy(brief.topOpportunities, opportunityScore, 0),
+  };
 }
 
 export function validateNarrativeInvariants(
