@@ -140,10 +140,17 @@ export async function executeAccountRun(
       },
     });
 
+    // Persist the goal linkage so the account page can roll gaps/opps up to
+    // their goal from live DB state (not just the run JSON). Gaps carry goalId
+    // directly; an opportunity's goal is its source gap's goal, resolved here
+    // from the JSON ids (DB cuids differ from the "gap-010" run ids).
+    const goalIdByGapId = new Map(result.gaps.gaps.map((gap) => [gap.id, gap.goalId]));
+
     await db.opportunity.createMany({
       data: result.opportunities.opportunities.map((opportunity) => ({
         accountId: account.id,
         qbrRunId: qbrRun.id,
+        goalId: goalIdByGapId.get(opportunity.gapId) ?? null,
         feature: opportunity.feature,
         title: opportunity.title,
         pitch: opportunity.pitch,
@@ -158,6 +165,7 @@ export async function executeAccountRun(
       data: result.gaps.gaps.map((gap) => ({
         accountId: account.id,
         qbrRunId: qbrRun.id,
+        goalId: gap.goalId,
         feature: gap.feature,
         reason: gap.reason,
         severity: gap.severity,

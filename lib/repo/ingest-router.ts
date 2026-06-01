@@ -189,10 +189,12 @@ export function tryStructuralExtract(file: UploadedFile): ClassifiedFile | null 
     }
   }
 
-  // Transcript header convention in this dataset: "Podium x <Customer> - <Topic>".
-  const headerMatch = file.content
-    .slice(0, 400)
-    .match(/podium\s*[x×]\s*([A-Za-z0-9 .&'-]{2,}?)\s*[-–—:|]/i);
+  // Transcript header convention in this dataset, either order:
+  //   "Podium x <Customer> - <Topic>"  or  "<Customer> x Podium | <Topic>".
+  const header = file.content.slice(0, 400);
+  const headerMatch =
+    header.match(/podium\s*[x×]\s*([A-Za-z0-9 .&'-]{2,}?)\s*[-–—:|]/i) ??
+    header.match(/^\s*([A-Za-z0-9 .&'-]{2,}?)\s*[x×]\s*podium\b/i);
   if (headerMatch?.[1]?.trim()) {
     return {
       filename: file.filename,

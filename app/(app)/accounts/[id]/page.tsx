@@ -1,11 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import {
-  createActionItemAction,
-  deleteActionItemAction,
-  updateActionItemStatusAction,
-} from "@/app/(app)/actions";
+import { ActionItemBoard, type BoardActionItem } from "@/app/(app)/accounts/[id]/action-item-board";
+import { AlignmentPanel, type AlignmentGoal } from "@/app/(app)/accounts/[id]/alignment-panel";
+import { HashTabs } from "@/app/(app)/accounts/[id]/hash-tabs";
+import { GapBoard, type BoardGap } from "@/app/(app)/gaps/gap-board";
 import { OpportunityBoard, type BoardOpportunity } from "@/app/(app)/opportunities/opportunity-board";
 import { AccountChat } from "@/components/app/account-chat";
 import { AccountSettings } from "@/components/app/account-settings";
@@ -14,23 +13,17 @@ import { SourceTimeline, type TimelineSourceSummary } from "@/components/app/sou
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { rollUpGoalWork } from "@/lib/alignment";
 import { requireCurrentUser } from "@/lib/auth/session";
 import { getAccountDetail } from "@/lib/repo/accounts";
 import { getChatHistory } from "@/lib/repo/chat";
 import { parsePersistedBriefData } from "@/lib/repo/runs";
-import { GapsSchema, OpportunitiesSchema } from "@/lib/schemas";
+import { GapsSchema, GoalsSchema, OpportunitiesSchema, UsageSchema } from "@/lib/schemas";
 
 function formatDate(value?: Date | null) {
   return value ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(value) : "Not set";
 }
-
-const ACTION_STATUS_VARIANT: Record<string, "secondary" | "warning" | "success"> = {
-  open: "secondary",
-  in_progress: "warning",
-  done: "success",
-};
 
 export default async function AccountDetailPage({
   params,
@@ -70,16 +63,19 @@ export default async function AccountDetailPage({
   const truncate = (text: string, max = 110) =>
     text.length > max ? `${text.slice(0, max).trimEnd()}…` : text;
 
+  // Parse the latest run's structured stages once, then derive every view from
+  // it: brief blurb lookups, the gaps/opps boards' labels, and the goal↔usage
+  // alignment join below.
+  const runGoals = latestRun ? GoalsSchema.parse(latestRun.goals).goals : [];
+  const runUsage = latestRun ? UsageSchema.parse(latestRun.usage).usage : [];
+  const runGaps = latestRun ? GapsSchema.parse(latestRun.gaps).gaps : [];
+  const runOpps = latestRun ? OpportunitiesSchema.parse(latestRun.opportunities).opportunities : [];
+
   const gapById = new Map(
-    (latestRun ? GapsSchema.parse(latestRun.gaps).gaps : []).map((gap) => [
-      gap.id,
-      { title: formatFeature(gap.feature), blurb: gap.reason },
-    ]),
+    runGaps.map((gap) => [gap.id, { title: formatFeature(gap.feature), blurb: gap.reason }]),
   );
   const oppById = new Map(
-    (latestRun ? OpportunitiesSchema.parse(latestRun.opportunities).opportunities : []).map(
-      (opp) => [opp.id, { title: formatFeature(opp.feature), blurb: opp.pitch }],
-    ),
+    runOpps.map((opp) => [opp.id, { title: formatFeature(opp.feature), blurb: opp.pitch }]),
   );
   const briefHref = latestRun ? `/accounts/${account.id}/qbr/${latestRun.id}` : null;
 
@@ -101,6 +97,62 @@ export default async function AccountDetailPage({
       tier: account.tier,
     },
   }));
+
+  // Same pattern as opportunities: the workspace Gaps board needs a nested
+  // `account`, and every gap here belongs to this account.
+  const boardGaps: BoardGap[] = account.gaps.map((gap) => ({
+    id: gap.id,
+    accountId: gap.accountId,
+    status: gap.status,
+    feature: gap.feature,
+    reason: gap.reason,
+    severity: gap.severity,
+    account: {
+      id: account.id,
+      name: account.name,
+      tier: account.tier,
+    },
+  }));
+
+  // Join usage to goals by goalId and count the gaps/opportunities each goal
+  // spawned — gaps carry goalId, opportunities carry gapId, so opps roll up via
+  // their gap. Goals/usage have no DB table or lifecycle, so this is read-only.
+  const usageByGoal = new Map(runUsage.map((item) => [item.goalId, item]));
+  // Live counts of *open* work per goal, read from the DB rows the kanban
+  // boards mutate (not the run JSON) — so dismissing a gap or losing an opp
+  // drops the goal's count. Rows persisted before goalId existed have it null
+  // and simply don't roll up; that's why the panel labels the totals as live.
+  const workByGoal = rollUpGoalWork(account.gaps, account.opportunities);
+
+  // The AM's confirm/dismiss decision per goal lives on the latest run.
+  const decisionByGoal = new Map(
+    (latestRun?.goalDecisions ?? []).map((decision) => [decision.goalId, decision.status]),
+  );
+
+  // Resolve evidence sourceIds to human labels so "Why this goal?" cites the
+  // call/email by name instead of a bare id.
+  const sourceLabelById = new Map(account.sources.map((source) => [source.id, source.label]));
+
+  const alignmentGoals: AlignmentGoal[] = runGoals.map((goal) => {
+    const usage = usageByGoal.get(goal.id) ?? null;
+    return {
+      id: goal.id,
+      title: goal.title,
+      description: goal.description,
+      confidence: goal.confidence,
+      decision: decisionByGoal.get(goal.id) ?? "pending",
+      evidence: goal.evidence.map((item) => ({
+        sourceId: item.sourceId,
+        sourceLabel: sourceLabelById.get(item.sourceId),
+        quote: item.quote,
+      })),
+      usage: usage
+        ? { status: usage.status, notes: usage.notes, metrics: usage.metrics }
+        : null,
+      gapCount: workByGoal.get(goal.id)?.gapCount ?? 0,
+      opportunityCount: workByGoal.get(goal.id)?.opportunityCount ?? 0,
+    };
+  });
 
   return (
     <div className="space-y-6">
@@ -144,10 +196,15 @@ export default async function AccountDetailPage({
         }}
       />
 
-      <Tabs defaultValue="overview" className="space-y-4">
+      <HashTabs
+        defaultValue="overview"
+        validValues={["overview", "sources", "gaps", "opportunities", "qbrs", "action-plan", "ask"]}
+        className="space-y-4"
+      >
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="sources">Sources</TabsTrigger>
+          <TabsTrigger value="gaps">Gaps</TabsTrigger>
           <TabsTrigger value="opportunities">Opportunities</TabsTrigger>
           <TabsTrigger value="qbrs">QBRs</TabsTrigger>
           <TabsTrigger value="action-plan">Action plan</TabsTrigger>
@@ -233,6 +290,12 @@ export default async function AccountDetailPage({
               </CardContent>
             </Card>
           </div>
+
+          <AlignmentPanel
+            goals={alignmentGoals}
+            accountId={account.id}
+            qbrRunId={latestRun?.id ?? null}
+          />
         </TabsContent>
 
         <TabsContent value="sources" className="space-y-4">
@@ -259,6 +322,18 @@ export default async function AccountDetailPage({
               />
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="gaps">
+          {boardGaps.length === 0 ? (
+            <Card>
+              <CardContent className="p-6 text-sm text-muted-foreground">
+                No adoption gaps yet. Generate a QBR to surface underused features tied to goals.
+              </CardContent>
+            </Card>
+          ) : (
+            <GapBoard gaps={boardGaps} showAccountFilter={false} />
+          )}
         </TabsContent>
 
         <TabsContent value="opportunities">
@@ -305,88 +380,18 @@ export default async function AccountDetailPage({
         </TabsContent>
 
         <TabsContent value="action-plan">
-          <div className="grid gap-4 lg:grid-cols-[1fr_0.8fr]">
-            <Card>
-              <CardHeader>
-                <CardTitle>Open action items</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {account.actionItems.length === 0 ? (
-                  <div className="rounded-3xl border border-dashed border-border/70 p-4 text-sm text-muted-foreground">
-                    No action items yet.
-                  </div>
-                ) : (
-                  account.actionItems.map((item) => (
-                    <div key={item.id} className="rounded-3xl border border-border/70 p-4">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div className={`font-medium ${item.status === "done" ? "text-muted-foreground line-through" : ""}`}>
-                          {item.title}
-                        </div>
-                        <Badge variant={ACTION_STATUS_VARIANT[item.status]}>
-                          {item.status.replace("_", " ")}
-                        </Badge>
-                      </div>
-                      <div className="mt-2 text-xs text-muted-foreground">
-                        Due {formatDate(item.dueDate)} · owner {item.ownerId || "unassigned"}
-                      </div>
-                      <div className="mt-3 flex flex-wrap items-center gap-2">
-                        <form action={updateActionItemStatusAction} className="flex items-center gap-2">
-                          <input type="hidden" name="accountId" value={account.id} />
-                          <input type="hidden" name="actionItemId" value={item.id} />
-                          <select
-                            name="status"
-                            defaultValue={item.status}
-                            className="h-9 rounded-full border border-input bg-background px-3 text-xs"
-                          >
-                            <option value="open">open</option>
-                            <option value="in_progress">in progress</option>
-                            <option value="done">done</option>
-                          </select>
-                          <Button type="submit" variant="outline" size="sm" className="h-9">
-                            Update
-                          </Button>
-                        </form>
-                        <form action={deleteActionItemAction}>
-                          <input type="hidden" name="accountId" value={account.id} />
-                          <input type="hidden" name="actionItemId" value={item.id} />
-                          <Button
-                            type="submit"
-                            variant="ghost"
-                            size="sm"
-                            className="h-9 text-destructive hover:text-destructive"
-                          >
-                            Delete
-                          </Button>
-                        </form>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Add MAP item</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <form action={createActionItemAction} className="space-y-4">
-                  <input type="hidden" name="accountId" value={account.id} />
-                  <input type="hidden" name="redirectTo" value={`/accounts/${account.id}`} />
-                  <input type="hidden" name="qbrRunId" value={latestRun?.id ?? ""} />
-                  <div className="space-y-2">
-                    <Input name="title" placeholder="Schedule product adoption workshop" required />
-                  </div>
-                  <div className="space-y-2">
-                    <Input name="dueDate" type="date" />
-                  </div>
-                  <Button type="submit" className="w-full">
-                    Save action item
-                  </Button>
-                </form>
-              </CardContent>
-            </Card>
-          </div>
+          <ActionItemBoard
+            accountId={account.id}
+            qbrRunId={latestRun?.id ?? undefined}
+            actionItems={account.actionItems.map<BoardActionItem>((item) => ({
+              id: item.id,
+              accountId: account.id,
+              title: item.title,
+              status: item.status,
+              ownerId: item.ownerId,
+              dueDate: item.dueDate ? item.dueDate.toISOString() : null,
+            }))}
+          />
         </TabsContent>
 
         <TabsContent value="ask">
@@ -405,7 +410,7 @@ export default async function AccountDetailPage({
             }))}
           />
         </TabsContent>
-      </Tabs>
+      </HashTabs>
     </div>
   );
 }

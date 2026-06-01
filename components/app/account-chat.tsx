@@ -158,6 +158,19 @@ export function AccountChat({
               ),
             )
           )}
+          {isPending ? (
+            <div className="flex justify-start">
+              <div
+                className="flex items-center gap-1 rounded-3xl bg-muted/60 px-4 py-3"
+                role="status"
+                aria-label="Assistant is typing"
+              >
+                <span className="h-2 w-2 animate-bounce rounded-full bg-foreground/40 [animation-delay:-0.3s]" />
+                <span className="h-2 w-2 animate-bounce rounded-full bg-foreground/40 [animation-delay:-0.15s]" />
+                <span className="h-2 w-2 animate-bounce rounded-full bg-foreground/40" />
+              </div>
+            </div>
+          ) : null}
         </div>
 
         {error ? <p className="text-sm text-destructive">{error}</p> : null}

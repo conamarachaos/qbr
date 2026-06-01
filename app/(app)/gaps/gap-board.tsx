@@ -120,7 +120,15 @@ function StatusColumn({
   );
 }
 
-export function GapBoard({ gaps }: { gaps: BoardGap[] }) {
+export function GapBoard({
+  gaps,
+  showAccountFilter = true,
+}: {
+  gaps: BoardGap[];
+  // Hide the per-account dropdown when the board is already scoped to a single
+  // account (e.g. the account detail page). Search stays available.
+  showAccountFilter?: boolean;
+}) {
   const [items, setItems] = useState(gaps);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -191,19 +199,21 @@ export function GapBoard({ gaps }: { gaps: BoardGap[] }) {
           onChange={(event) => setSearch(event.target.value)}
           className="sm:max-w-sm"
         />
-        <Select value={accountId} onValueChange={setAccountId}>
-          <SelectTrigger className="sm:w-64">
-            <SelectValue placeholder="All accounts" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All accounts</SelectItem>
-            {accounts.map((account) => (
-              <SelectItem key={account.id} value={account.id}>
-                {account.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {showAccountFilter ? (
+          <Select value={accountId} onValueChange={setAccountId}>
+            <SelectTrigger className="sm:w-64">
+              <SelectValue placeholder="All accounts" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All accounts</SelectItem>
+              {accounts.map((account) => (
+                <SelectItem key={account.id} value={account.id}>
+                  {account.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : null}
         {(search || accountId !== "all") && (
           <span className="text-sm text-muted-foreground">{filtered.length} matching</span>
         )}

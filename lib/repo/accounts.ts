@@ -1,6 +1,7 @@
 import {
   ActionStatus,
   type GapStatus,
+  type GoalDecisionStatus,
   type Lifecycle,
   type OppStage,
   type Prisma,
@@ -72,6 +73,7 @@ const detailInclude = {
     },
     include: {
       brief: true,
+      goalDecisions: true,
     },
   },
   sources: {
@@ -85,6 +87,11 @@ const detailInclude = {
     },
   },
   opportunities: {
+    orderBy: {
+      createdAt: "desc",
+    },
+  },
+  gaps: {
     orderBy: {
       createdAt: "desc",
     },
@@ -1016,5 +1023,47 @@ export async function updateGapStatus(
   return db.gap.update({
     where: { id: gap.id },
     data: { status: input.status },
+  });
+}
+
+// Record an AM's confirm/dismiss decision on an AI-inferred goal. Goals live in
+// the run JSON, so we key the decision by (qbrRunId, goalId) and verify the run
+// belongs to an account the caller can access.
+export async function setGoalDecision(
+  context: SessionContext,
+  input: {
+    accountId: string;
+    qbrRunId: string;
+    goalId: string;
+    status: GoalDecisionStatus;
+  },
+  db: DbClient = prisma,
+) {
+  const run = await db.qbrRun.findFirst({
+    where: {
+      id: input.qbrRunId,
+      account: buildAccountAccessWhere(context, input.accountId),
+    },
+    select: { id: true },
+  });
+
+  if (!run) {
+    throw new Error("QBR run not found.");
+  }
+
+  return db.goalDecision.upsert({
+    where: {
+      qbrRunId_goalId: { qbrRunId: input.qbrRunId, goalId: input.goalId },
+    },
+    create: {
+      qbrRunId: input.qbrRunId,
+      goalId: input.goalId,
+      status: input.status,
+      decidedById: context.userId,
+    },
+    update: {
+      status: input.status,
+      decidedById: context.userId,
+    },
   });
 }

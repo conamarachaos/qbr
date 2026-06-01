@@ -196,8 +196,32 @@ model QbrRun {
   createdAt     DateTime  @default(now())
   account       Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
   brief         Brief?
+  goalDecisions GoalDecision[]
 
   @@index([accountId])
+}
+
+// Goals live only in QbrRun.goals JSON (no Goal table), but AMs need to confirm
+// or dismiss an inferred goal — the case study's top risk is incorrect goal
+// inference. We track that human decision per (run, goal) without migrating the
+// JSON into a relational table. status defaults to `pending` (un-reviewed).
+model GoalDecision {
+  id        String         @id @default(cuid())
+  qbrRunId  String
+  goalId    String
+  status    GoalDecisionStatus @default(pending)
+  decidedById String?
+  updatedAt DateTime       @updatedAt
+  qbrRun    QbrRun         @relation(fields: [qbrRunId], references: [id], onDelete: Cascade)
+
+  @@unique([qbrRunId, goalId])
+  @@index([qbrRunId])
+}
+
+enum GoalDecisionStatus {
+  pending
+  confirmed
+  dismissed
 }
 
 enum RunStatus {
@@ -220,6 +244,9 @@ model Opportunity {
   id             String    @id @default(cuid())
   accountId      String
   qbrRunId       String?
+  // The goal this opportunity rolls up to, resolved from its source gap at
+  // persist time. Nullable for rows created before this column existed.
+  goalId         String?
   feature        String
   title          String?
   pitch          String    @db.Text
@@ -252,6 +279,9 @@ model Gap {
   id         String    @id @default(cuid())
   accountId  String
   qbrRunId   String?
+  // The customer goal this gap is tied to, from the run JSON. Nullable for
+  // rows created before this column existed.
+  goalId     String?
   feature    String
   reason     String    @db.Text
   severity   Int       @default(3)

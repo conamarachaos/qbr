@@ -408,13 +408,6 @@ export function BriefView(props: BriefViewProps) {
               ) : null}
             </div>
             <CardTitle className="text-2xl">{props.brief.accountName}</CardTitle>
-            <Textarea
-              value={editedBrief.summary}
-              onChange={(event) =>
-                setEditedBrief((current) => ({ ...current, summary: event.target.value }))
-              }
-              className="min-h-[120px] max-w-3xl text-base leading-7"
-            />
           </div>
           <div className="flex flex-col items-start gap-3 md:items-end">
             <div className="text-right text-sm text-muted-foreground">
@@ -531,6 +524,28 @@ export function BriefView(props: BriefViewProps) {
                 {slackStatus.message}
               </div>
             ) : null}
+          </div>
+          <div className="space-y-1.5 md:basis-full">
+            <div className="flex items-center justify-between">
+              <label
+                htmlFor="brief-summary"
+                className="text-xs font-medium uppercase tracking-wide text-muted-foreground"
+              >
+                Executive summary
+              </label>
+              <span className="text-xs text-muted-foreground">
+                {editedBrief.summary.trim().split(/\s+/).filter(Boolean).length} words
+              </span>
+            </div>
+            <Textarea
+              id="brief-summary"
+              value={editedBrief.summary}
+              onChange={(event) =>
+                setEditedBrief((current) => ({ ...current, summary: event.target.value }))
+              }
+              rows={10}
+              className="min-h-[220px] w-full resize-y text-base leading-7"
+            />
           </div>
         </CardHeader>
       </Card>

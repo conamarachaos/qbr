@@ -48,9 +48,9 @@ export default async function ProductLayout({
             <Button asChild variant="ghost" className="justify-start">
               <Link href="/gaps">Gaps</Link>
             </Button>
-            <Button asChild variant="ghost" className="justify-start">
+            {/* <Button asChild variant="ghost" className="justify-start">
               <Link href="/workbench">Workbench</Link>
-            </Button>
+            </Button> */}
           </nav>
 
           <div className="mt-auto rounded-3xl border border-border/70 bg-muted/40 p-4">

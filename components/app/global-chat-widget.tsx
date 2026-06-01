@@ -231,6 +231,19 @@ export function GlobalChatWidget({ accounts }: { accounts: AccountOption[] }) {
             ),
           )
         )}
+        {isPending ? (
+          <div className="flex justify-start">
+            <div
+              className="flex items-center gap-1 rounded-2xl bg-muted/60 px-3 py-2"
+              role="status"
+              aria-label="Assistant is typing"
+            >
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/40 [animation-delay:-0.3s]" />
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/40 [animation-delay:-0.15s]" />
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/40" />
+            </div>
+          </div>
+        ) : null}
         {error ? <p className="text-xs text-destructive">{error}</p> : null}
       </div>
 

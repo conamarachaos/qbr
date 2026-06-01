@@ -3,6 +3,7 @@
 import {
   type ActionStatus,
   type GapStatus,
+  type GoalDecisionStatus,
   type Lifecycle,
   type OppStage,
   type Tier,
@@ -17,6 +18,7 @@ import {
   createActionItem,
   deleteAccount,
   deleteActionItem,
+  setGoalDecision,
   updateActionItemStatus,
   updateGapStatus,
   importDatasetAccount,
@@ -244,34 +246,15 @@ export async function deleteAccountAction(formData: FormData) {
   redirect("/portfolio");
 }
 
-export async function createActionItemAction(formData: FormData) {
+// Object-arg actions for the action-item kanban board. The board calls these
+// directly so it can optimistically update and add items from a modal without a
+// navigation.
+export async function moveActionItemStatusAction(input: {
+  accountId: string;
+  actionItemId: string;
+  status: ActionStatus;
+}) {
   const user = await requireCurrentUser();
-  const accountId = String(formData.get("accountId") ?? "");
-  const redirectTo = String(formData.get("redirectTo") ?? `/accounts/${accountId}`);
-
-  await createActionItem(
-    {
-      userId: user.id,
-      workspaceId: user.workspaceId,
-      role: user.role,
-    },
-    {
-      accountId,
-      qbrRunId: String(formData.get("qbrRunId") ?? "") || undefined,
-      title: String(formData.get("title") ?? "").trim(),
-      dueDate: parseOptionalDate(formData.get("dueDate")),
-    },
-  );
-
-  revalidatePath(`/accounts/${accountId}`);
-  redirect(redirectTo);
-}
-
-export async function updateActionItemStatusAction(formData: FormData) {
-  const user = await requireCurrentUser();
-  const accountId = String(formData.get("accountId") ?? "");
-  const actionItemId = String(formData.get("actionItemId") ?? "");
-  const status = String(formData.get("status") ?? "open") as ActionStatus;
 
   await updateActionItemStatus(
     {
@@ -279,16 +262,51 @@ export async function updateActionItemStatusAction(formData: FormData) {
       workspaceId: user.workspaceId,
       role: user.role,
     },
-    { actionItemId, status },
+    { actionItemId: input.actionItemId, status: input.status },
   );
 
-  revalidatePath(`/accounts/${accountId}`);
+  revalidatePath(`/accounts/${input.accountId}`);
 }
 
-export async function deleteActionItemAction(formData: FormData) {
+export async function addActionItemAction(input: {
+  accountId: string;
+  qbrRunId?: string;
+  title: string;
+  dueDate?: string | null;
+}) {
   const user = await requireCurrentUser();
-  const accountId = String(formData.get("accountId") ?? "");
-  const actionItemId = String(formData.get("actionItemId") ?? "");
+
+  const created = await createActionItem(
+    {
+      userId: user.id,
+      workspaceId: user.workspaceId,
+      role: user.role,
+    },
+    {
+      accountId: input.accountId,
+      qbrRunId: input.qbrRunId || undefined,
+      title: input.title.trim(),
+      dueDate: input.dueDate ? new Date(input.dueDate) : null,
+    },
+  );
+
+  revalidatePath(`/accounts/${input.accountId}`);
+
+  return {
+    id: created.id,
+    accountId: created.accountId,
+    title: created.title,
+    status: created.status,
+    ownerId: created.ownerId,
+    dueDate: created.dueDate ? created.dueDate.toISOString() : null,
+  };
+}
+
+export async function removeActionItemAction(input: {
+  accountId: string;
+  actionItemId: string;
+}) {
+  const user = await requireCurrentUser();
 
   await deleteActionItem(
     {
@@ -296,10 +314,10 @@ export async function deleteActionItemAction(formData: FormData) {
       workspaceId: user.workspaceId,
       role: user.role,
     },
-    { actionItemId },
+    { actionItemId: input.actionItemId },
   );
 
-  revalidatePath(`/accounts/${accountId}`);
+  revalidatePath(`/accounts/${input.accountId}`);
 }
 
 export async function updateOpportunityStageAction(formData: FormData) {
@@ -373,4 +391,29 @@ export async function moveGapStatusAction(input: {
 
   revalidatePath(`/accounts/${input.accountId}`);
   revalidatePath("/gaps");
+}
+
+export async function setGoalDecisionAction(input: {
+  accountId: string;
+  qbrRunId: string;
+  goalId: string;
+  status: GoalDecisionStatus;
+}) {
+  const user = await requireCurrentUser();
+
+  await setGoalDecision(
+    {
+      userId: user.id,
+      workspaceId: user.workspaceId,
+      role: user.role,
+    },
+    {
+      accountId: input.accountId,
+      qbrRunId: input.qbrRunId,
+      goalId: input.goalId,
+      status: input.status,
+    },
+  );
+
+  revalidatePath(`/accounts/${input.accountId}`);
 }
