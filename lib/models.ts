@@ -1,4 +1,4 @@
-import { anthropic } from "@ai-sdk/anthropic";
+import { createAnthropic } from "@ai-sdk/anthropic";
 import type { LanguageModel } from "ai";
 
 type ModelRole = "extraction" | "narrative" | "routing";
@@ -10,6 +10,24 @@ const DEFAULT_MODELS: Record<ModelRole, string> = {
   // file?) — use the fast model so analyzing a big upload batch stays snappy.
   routing: "claude-haiku-4-5-20251001",
 };
+
+// Some environments export ANTHROPIC_BASE_URL without the required `/v1` suffix
+// (e.g. `https://api.anthropic.com`). The provider appends `/messages`, so a
+// missing `/v1` makes every request 404. Normalize it so the pipeline works
+// regardless; an unset value falls back to the SDK default.
+function resolveAnthropicBaseURL(): string | undefined {
+  const raw = process.env.ANTHROPIC_BASE_URL?.trim();
+  if (!raw) {
+    return undefined;
+  }
+  const withoutTrailingSlash = raw.replace(/\/+$/, "");
+  return /\/v\d+$/.test(withoutTrailingSlash)
+    ? withoutTrailingSlash
+    : `${withoutTrailingSlash}/v1`;
+}
+
+const baseURL = resolveAnthropicBaseURL();
+const anthropic = createAnthropic(baseURL ? { baseURL } : {});
 
 function requireEnv(name: string) {
   const value = process.env[name];
